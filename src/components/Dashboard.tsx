@@ -57,7 +57,7 @@ import WelcomeTimetable from './onboarding/WelcomeTimetable';
 import HomeCoachChip from './onboarding/HomeCoachChip';
 import FirstHoverHints from './shared/FirstHoverHint';
 const CalendarView = lazy(() => import('./sections/calendar/CalendarView'));
-import { topicDeadlineEvents, noteEvents, eventsOnDay } from '../lib/calendar';
+import { topicDeadlineEvents, noteEvents, eventsOnDay, feedColor } from '../lib/calendar';
 const DailyPlannerView = lazy(() => import('./sections/DailyPlannerView'));
 const HabitsView = lazy(() => import('./sections/HabitsView'));
 const HealthView = lazy(() => import('./sections/HealthView'));
@@ -72,7 +72,6 @@ import ErrorBoundary from './ErrorBoundary';
 const EMAIL_REFRESH_MS = 15 * 60 * 1000;
 const PROVIDER_CFG: Record<EmailProvider, ProviderConfig> = { gmail: gmailConfig, outlook: outlookConfig };
 
-const FEED_COLORS = ['#7da7d9', '#c9a8d4', '#b8c7a1', '#d4b896', '#c7a1a1', '#a1bdc7'];
 const FEED_REFRESH_MS = 60 * 60 * 1000;
 const EMPTY_CACHE: CalendarCache = { lastSync: null, feeds: {} };
 
@@ -1007,7 +1006,7 @@ export default function Dashboard() {
       // feed, so it stays out of the startup bundle.
       const { fetchFeed } = await import('../lib/ical');
       await Promise.all(calendarFeeds.map(async (feed, idx) => {
-        const color = FEED_COLORS[idx % FEED_COLORS.length];
+        const color = feedColor(feed, idx);
         try {
           feeds[feed.id] = { fetchedAt: Date.now(), events: await fetchFeed(feed, color) };
         } catch (e) {
@@ -1036,10 +1035,17 @@ export default function Dashboard() {
   }, [loading, refreshFeeds]);
 
   const feedEvents = useMemo<CalendarEvent[]>(() => {
-    const ids = new Set(calendarFeeds.map(f => f.id));
+    // Colour is applied here rather than baked in at fetch time, so recolouring
+    // a feed in the Calendars menu is instant instead of waiting on a refetch.
+    // Hidden feeds drop out entirely.
+    const shown = new Map(
+      calendarFeeds
+        .map((f, i) => [f.id, feedColor(f, i)] as const)
+        .filter(([id]) => calendarFeeds.find(f => f.id === id)?.enabled !== false),
+    );
     const icsEvents = Object.entries(calendarCache.feeds)
-      .filter(([id]) => ids.has(id))
-      .flatMap(([, entry]) => entry.events);
+      .filter(([id]) => shown.has(id))
+      .flatMap(([id, entry]) => entry.events.map(e => ({ ...e, color: shown.get(id)! })));
     // Merge in Google Calendar events from enabled connections.
     return [...icsEvents, ...gcalEvents];
   }, [calendarFeeds, calendarCache, gcalEvents]);
@@ -1943,6 +1949,7 @@ export default function Dashboard() {
               feedEvents={feedEvents}
               calendarFeeds={calendarFeeds}
               onAddFeed={(feed) => setCalendarFeeds(prev => [...prev, feed])}
+              onCalendarFeedsChange={setCalendarFeeds}
               topics={topics}
               onAddTopicItem={(topicId, text, deadline) => {
                 setTopics(prev => prev.map(tp =>

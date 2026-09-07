@@ -37,6 +37,18 @@ export function topicDeadlineEvents(topics: Topic[]): CalendarEvent[] {
 
 /** A single-day CalendarEvent built from a note anchored to `dayMs` (local
  *  midnight). Shared by one-off notes and each expanded recurring occurrence. */
+/**
+ * Default colours handed to subscribed feeds, by position, until the user picks
+ * one. Single source of truth: Dashboard colours events with it, the Calendars
+ * menu shows the same swatch, and AddFeedForm previews it.
+ */
+export const FEED_COLORS = ['#7da7d9', '#c9a8d4', '#b8c7a1', '#d4b896', '#c7a1a1', '#a1bdc7'];
+
+/** The colour a feed shows in, honouring the user's choice over the default. */
+export function feedColor(feed: { color?: string }, index: number): string {
+  return feed.color ?? FEED_COLORS[index % FEED_COLORS.length];
+}
+
 function noteEventForDay(n: CalendarNote, dayMs: number, idSuffix = ''): CalendarEvent {
   const start = n.startMin != null ? dayMs + n.startMin * 60_000 : dayMs;
   const end = n.endMin != null ? dayMs + n.endMin * 60_000 : null;

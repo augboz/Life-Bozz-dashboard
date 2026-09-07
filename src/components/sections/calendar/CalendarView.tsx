@@ -12,6 +12,7 @@ import { SectionHeader } from '../../shared/ui';
 import ColorBankPicker from '../../shared/ColorBankPicker';
 import AddFeedForm from './AddFeedForm';
 import TypeTimetableForm from './TypeTimetableForm';
+import CalendarsMenu from './CalendarsMenu';
 
 interface CalendarViewProps {
   t: Theme;
@@ -20,6 +21,8 @@ interface CalendarViewProps {
   calendarFeeds?: CalendarFeed[];
   /** Add a validated feed (from the "Add your timetable" front door). */
   onAddFeed?: (feed: CalendarFeed) => void;
+  /** Replace the feed list — recolour, show/hide, or remove, from the Calendars menu. */
+  onCalendarFeedsChange?: (next: CalendarFeed[]) => void;
   topics?: Topic[];
   onAddTopicItem?: (topicId: string, text: string, deadline: number) => void;
   calendarNotes?: CalendarNote[];
@@ -457,8 +460,13 @@ function TimeGrid({
                       height,
                       left: `${col * colW}%`,
                       width: `${colW - 1}%`,
-                      background: event.color + '33',
-                      borderLeft: `3px solid ${event.color}`,
+                      // Colour carries which calendar an event came from, so it
+                      // needs to read at a glance: a solid 4px spine plus a
+                      // firmer wash and outline, rather than a faint tint.
+                      background: event.color + '4d',
+                      borderLeft: `4px solid ${event.color}`,
+                      border: `1px solid ${event.color}80`,
+                      borderLeftWidth: '4px',
                       borderRadius: '4px',
                       padding: '2px 4px',
                       overflow: 'hidden',
@@ -466,7 +474,7 @@ function TimeGrid({
                       pointerEvents: 'auto',
                     }}
                   >
-                    <div style={{ fontSize: '0.6rem', color: event.color, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: '0.6rem', color: event.color, fontWeight: 700, whiteSpace: 'nowrap' }}>
                       {minToLabel(sm)}
                     </div>
                     <div style={{ fontSize: '0.65rem', color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -517,12 +525,12 @@ function EventChip({ event, t }: { event: CalendarEvent; t: Theme }) {
       fontSize: '0.62rem',
       padding: isDeadline ? '1px 4px' : '2px 5px',
       borderRadius: '4px',
-      background: isDeadline ? 'transparent' : event.color + '25',
-      border: isDeadline ? `1px dashed ${event.color}55` : `1px solid ${event.color}44`,
+      background: isDeadline ? 'transparent' : event.color + '3d',
+      border: isDeadline ? `1px dashed ${event.color}55` : `1px solid ${event.color}77`,
       color: t.text,
       overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
     }}>
-      <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: event.color, flexShrink: 0 }} />
+      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: event.color, flexShrink: 0 }} />
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: isDeadline ? t.textMuted : t.text }}>
         {event.title}
       </span>
@@ -584,8 +592,8 @@ function MonthGrid({ t, cursor, events, onPick }: {
                 <div key={e.id} style={{
                   display: 'flex', alignItems: 'center', gap: '2px',
                   fontSize: '0.6rem', overflow: 'hidden',
-                  background: e.color + '28', borderRadius: '3px',
-                  padding: '1px 3px', border: `1px solid ${e.color}44`,
+                  background: e.color + '40', borderRadius: '3px',
+                  padding: '1px 3px', border: `1px solid ${e.color}77`,
                 }}>
                   <Clock size={7} strokeWidth={2} color={e.color} style={{ flexShrink: 0 }} />
                   <span style={{ color: e.color, flexShrink: 0, fontWeight: 500 }}>
@@ -602,7 +610,7 @@ function MonthGrid({ t, cursor, events, onPick }: {
                 <div key={e.id} style={{
                   display: 'flex', alignItems: 'center', gap: '2px',
                   fontSize: '0.6rem', overflow: 'hidden',
-                  background: e.color + '22', borderRadius: '3px',
+                  background: e.color + '3a', borderRadius: '3px',
                   padding: '1px 3px',
                 }}>
                   <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: e.color, flexShrink: 0 }} />
@@ -841,7 +849,7 @@ function DayPanel({ t, day, events, onClose, topics, onAddTopicItem, tbOffset = 
 
 export default function CalendarView({
   t, feedEvents, topics, onAddTopicItem,
-  calendarFeeds = [], onAddFeed,
+  calendarFeeds = [], onAddFeed, onCalendarFeedsChange,
   calendarNotes = [], onCalendarNotesChange,
   calendarConnections = [],
   onCalendarConnectionsChange,
@@ -872,7 +880,6 @@ export default function CalendarView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
   const [createFor, setCreateFor] = useState<{ day: Date; startMin?: number } | null>(null);
-  const [colorPickingFor, setColorPickingFor] = useState<string | null>(null);
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [typeTimetableOpen, setTypeTimetableOpen] = useState(false);
   // Persisted dismissal of the "Add your timetable" front door, so a user who
@@ -947,22 +954,20 @@ export default function CalendarView({
         t={t}
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <button
-              onClick={() => { setTypeTimetableOpen(true); setAddFeedOpen(false); setSelected(null); setCreateFor(null); }}
-              style={{ ...ghostBtn(t), color: t.text, borderColor: t.borderStrong }}
-              title="Type your classes in plain English"
-            >
-              <Keyboard size={13} strokeWidth={1.6} /> Type classes
-            </button>
-            {canAddFeed && (
-              <button
-                onClick={() => { setAddFeedOpen(true); setTypeTimetableOpen(false); setSelected(null); setCreateFor(null); }}
-                style={{ ...ghostBtn(t), color: t.text, borderColor: t.borderStrong }}
-                title="Add a timetable / calendar subscription"
-              >
-                <CalendarPlus size={13} strokeWidth={1.6} /> Add link
-              </button>
-            )}
+            <CalendarsMenu
+              t={t}
+              colorBank={colorBank}
+              calendarFeeds={calendarFeeds}
+              onCalendarFeedsChange={onCalendarFeedsChange}
+              calendarConnections={calendarConnections}
+              onCalendarConnectionsChange={onCalendarConnectionsChange}
+              calendarNotes={calendarNotes}
+              onCalendarNotesChange={onCalendarNotesChange}
+              onTypeClasses={() => { setTypeTimetableOpen(true); setAddFeedOpen(false); setSelected(null); setCreateFor(null); }}
+              onAddLink={canAddFeed
+                ? () => { setAddFeedOpen(true); setTypeTimetableOpen(false); setSelected(null); setCreateFor(null); }
+                : undefined}
+            />
             <Segmented mode={mode} setMode={setMode} t={t} />
             <button onClick={() => setCursor(new Date())} style={ghostBtn(t)}>today</button>
             <button onClick={() => step(-1)} aria-label="Previous" style={ghostBtn(t)}>
@@ -1011,80 +1016,9 @@ export default function CalendarView({
         </div>
       )}
 
-      {/* Per-account enable/disable toggles */}
-      {calendarConnections.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '1rem' }}>
-          {calendarConnections.map(conn => {
-            const defaultColor = conn.provider === 'googleCalendar' ? '#4285F4' : '#555555';
-            const displayColor = conn.color ?? defaultColor;
-            const label = conn.provider === 'googleCalendar' ? 'Google Calendar' : 'Apple Calendar';
-            const pickerKey = `${conn.provider}:${conn.email}`;
-            const isPickerOpen = colorPickingFor === pickerKey;
-            return (
-              <div key={`${conn.provider}:${conn.email}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
-                  <button
-                    onClick={() => onCalendarConnectionsChange?.(
-                      calendarConnections.map(c =>
-                        c.email === conn.email && c.provider === conn.provider
-                          ? { ...c, enabled: !c.enabled } : c
-                      )
-                    )}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                      padding: '0.3rem 0.75rem', borderRadius: '999px',
-                      background: conn.enabled ? displayColor + '20' : 'transparent',
-                      border: `1.5px solid ${conn.enabled ? displayColor : t.border}`,
-                      color: conn.enabled ? displayColor : t.textMuted,
-                      fontSize: '0.75rem', fontFamily: 'inherit', cursor: 'pointer',
-                      transition: 'all 0.12s',
-                    }}
-                  >
-                    <span style={{
-                      width: '7px', height: '7px', borderRadius: '50%',
-                      background: conn.enabled ? displayColor : t.borderStrong, flexShrink: 0,
-                    }} />
-                    {label}
-                    <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>{conn.email}</span>
-                  </button>
-                  {/* Color swatch opens inline bank picker */}
-                  <button
-                    onClick={() => setColorPickingFor(isPickerOpen ? null : pickerKey)}
-                    title="Change colour"
-                    style={{
-                      width: '12px', height: '12px',
-                      minWidth: '12px', minHeight: '12px',
-                      borderRadius: '50%', boxSizing: 'content-box',
-                      background: displayColor,
-                      border: isPickerOpen ? `2px solid ${t.text}` : `1.5px solid ${t.border}`,
-                      cursor: 'pointer', padding: 0, flexShrink: 0, alignSelf: 'center',
-                    }}
-                  />
-                </div>
-                {/* Inline colour bank picker */}
-                {isPickerOpen && (
-                  <div style={{ paddingLeft: '0.5rem' }}>
-                    <ColorBankPicker
-                      bank={colorBank}
-                      selected={conn.color}
-                      onChange={(c) => {
-                        onCalendarConnectionsChange?.(
-                          calendarConnections.map(cc =>
-                            cc.email === conn.email && cc.provider === conn.provider
-                              ? { ...cc, color: c } : cc
-                          )
-                        );
-                        setColorPickingFor(null);
-                      }}
-                      swatchSize={16}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* Per-account chips used to live here, always on screen. They moved into
+         the Calendars dropdown in the header, which also carries colour,
+         visibility and removal for subscribed links. */}
 
       {/* "Add your timetable" front door — shown prominently until the user has a
           feed AND no typed classes. Type is the primary action (no .ics needed);

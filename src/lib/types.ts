@@ -285,6 +285,10 @@ export interface CalendarFeed {
   id: string;
   label: string;
   url: string;
+  /** User-chosen colour. Unset = the rotating default for its position. */
+  color?: string;
+  /** Whether this feed's events show. Unset = visible (feeds predating this). */
+  enabled?: boolean;
 }
 
 export type CalendarProvider = 'googleCalendar' | 'appleCalendar';
