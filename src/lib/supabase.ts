@@ -2,8 +2,37 @@ import { createClient, type Session } from '@supabase/supabase-js';
 import { platformFetch } from './http';
 import { isTauri } from './platform';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_KEY as string | undefined;
+/**
+ * Scrub paste artifacts out of the build-time credentials.
+ *
+ * These are baked in from CI secrets, and a secret pasted with a BOM, a
+ * zero-width space, a smart quote or a stray newline is invisible in the
+ * GitHub UI and unreadable afterwards. It is also catastrophic: supabase-js
+ * sends the key as `Authorization: Bearer <key>`, and one non-Latin-1
+ * character there makes the fetch Headers API throw before a single request
+ * leaves the app. Every Supabase call fails, including sign-in, with an error
+ * that names neither the key nor the cause.
+ *
+ * That is exactly what happened here: packaged builds could not talk to
+ * Supabase at all, while dev builds (reading a clean .env.local) worked — which
+ * is what made it look like a per-device sync bug for weeks. A JWT is only
+ * base64url segments and dots, so anything outside that charset is noise and
+ * safe to drop.
+ */
+function sanitizeCredential(raw: string | undefined, label: string): string | undefined {
+  if (!raw) return raw;
+  const cleaned = raw.replace(/[^A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]/g, '').trim();
+  if (cleaned !== raw) {
+    console.error(
+      `[supabase] ${label} contained ${raw.length - cleaned.length} character(s) that cannot be sent ` +
+      'in an HTTP header (likely a paste artifact in the build secret) — stripped.',
+    );
+  }
+  return cleaned;
+}
+
+const url = sanitizeCredential(import.meta.env.VITE_SUPABASE_URL as string | undefined, 'VITE_SUPABASE_URL');
+const key = sanitizeCredential(import.meta.env.VITE_SUPABASE_KEY as string | undefined, 'VITE_SUPABASE_KEY');
 
 if (!url || !key) {
   // We don't crash — the app still works locally without sync. Auth screen
