@@ -112,6 +112,8 @@ export default function Dashboard() {
   const [topicFolders, setTopicFolders] = useState<TopicFolder[]>([]);
   const [sidebarEditing, setSidebarEditing] = useState(false);
   const [collapsedFolderOpen, setCollapsedFolderOpen] = useState<string | null>(null);
+  /** Sidebar row under the pointer. Drives hover styling (see navBtn). */
+  const [hoverNavId, setHoverNavId] = useState<string | null>(null);
   const [onbDismissed, setOnbDismissed] = useState(false);
   // When a walkthrough is active the Onboarding component must stay mounted
   // even when the user navigates away from home so the spotlight persists.
@@ -1385,6 +1387,16 @@ export default function Dashboard() {
 
             const navBtn = (id: string, label: string, Icon: ElementType, _accent?: string, indent = false) => {
               const isActive = activeSection === id;
+              // Hover styling is derived from state, not written to the DOM.
+              // The old handlers set transform: scale(1.12) directly on the
+              // element in collapsed mode and only ever cleared it on
+              // mouse-leave "if not active" — so hovering an icon and clicking
+              // it (making it active) left the scale stuck on that row. Expand
+              // the sidebar and that row rendered 12% larger and shifted left
+              // of its neighbours: the "Home and Calendar aren't on the same
+              // vertical as the topics" report. Deriving it means every render
+              // recomputes it and nothing can outlive the state that caused it.
+              const isHover = hoverNavId === id && !isActive;
               return (
                 <button
                   key={id}
@@ -1396,18 +1408,19 @@ export default function Dashboard() {
                     justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                     gap: '0.5rem',
                     width: '100%',
-                    background: isActive ? sT.bgAlt : 'transparent',
+                    background: isActive || isHover ? sT.bgAlt : 'transparent',
                     border: 'none',
-                    color: isActive ? sT.text : sT.textMuted,
+                    color: isActive || isHover ? sT.text : sT.textMuted,
                     padding: sidebarCollapsed ? '0.5rem' : indent ? '0.42rem 0.6rem 0.42rem 1.4rem' : '0.42rem 0.6rem',
                     cursor: 'pointer', borderRadius: '8px',
                     fontSize: '0.875rem', fontWeight: isActive ? 500 : 400, letterSpacing: '-0.01em',
                     fontFamily: 'inherit', textAlign: 'left',
                     transition: 'background 0.15s, color 0.15s, transform 0.12s',
                     position: 'relative',
+                    transform: sidebarCollapsed && isHover ? 'scale(1.12)' : 'none',
                   }}
-                  onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = sT.bgAlt; e.currentTarget.style.color = sT.text; if (sidebarCollapsed) e.currentTarget.style.transform = 'scale(1.12)'; } }}
-                  onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = sT.textMuted; if (sidebarCollapsed) e.currentTarget.style.transform = 'scale(1)'; } }}
+                  onMouseEnter={() => setHoverNavId(id)}
+                  onMouseLeave={() => setHoverNavId(prev => (prev === id ? null : prev))}
                 >
                   {sidebarCollapsed ? (
                     <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
@@ -1442,6 +1455,8 @@ export default function Dashboard() {
                     // Collapsed: show folder icon, click to toggle inline topic icons
                     if (folderTopics.length === 0) return null;
                     const isOpen = collapsedFolderOpen === folder.id;
+                    // Same state-derived hover as navBtn, for the same reason.
+                    const folderHover = hoverNavId === folder.id && !isOpen;
                     return (
                       <div key={folder.id}>
                         <button
@@ -1450,16 +1465,17 @@ export default function Dashboard() {
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             width: '100%',
-                            background: isOpen ? sT.bgAlt : 'transparent',
+                            background: isOpen || folderHover ? sT.bgAlt : 'transparent',
                             border: 'none',
-                            color: isOpen ? sT.text : sT.textMuted,
+                            color: isOpen || folderHover ? sT.text : sT.textMuted,
                             padding: '0.5rem', cursor: 'pointer',
                             borderRadius: isOpen ? '8px 8px 0 0' : '8px',
                             transition: 'background 0.15s, color 0.15s, border-radius 0.15s, transform 0.12s',
+                            transform: folderHover ? 'scale(1.12)' : 'none',
                           }}
-                          onMouseEnter={e => { if (!isOpen) { e.currentTarget.style.background = sT.bgAlt; e.currentTarget.style.color = sT.text; e.currentTarget.style.transform = 'scale(1.12)'; } }}
-                          onMouseLeave={e => { if (!isOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = sT.textMuted; e.currentTarget.style.transform = 'scale(1)'; } }}
-                        >
+                          onMouseEnter={() => setHoverNavId(folder.id)}
+                          onMouseLeave={() => setHoverNavId(prev => (prev === folder.id ? null : prev))}
+                >
                           <FolderIcon size={16} strokeWidth={1.5} />
                         </button>
                         {isOpen && (
