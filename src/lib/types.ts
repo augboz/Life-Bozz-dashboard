@@ -353,6 +353,11 @@ export interface CalendarEvent {
   /** Optional room / location, e.g. "Room 3.21". Carried from recurring/one-off
    *  notes so the Today brief and Next-class banner can show where to be. */
   location?: string;
+  /** Longer text from the source (iCal DESCRIPTION, or a note's own notes).
+   *  Only shown in the event detail popover — grid blocks stay one line. */
+  description?: string;
+  /** Which feed this came from, so details can name the calendar. */
+  feedId?: string;
 }
 
 export interface FeedCacheEntry {

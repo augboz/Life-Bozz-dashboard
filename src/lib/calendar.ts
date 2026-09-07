@@ -63,6 +63,7 @@ function noteEventForDay(n: CalendarNote, dayMs: number, idSuffix = ''): Calenda
     startMin: n.startMin ?? undefined,
     endMin: n.endMin ?? undefined,
     location: n.location,
+    description: n.notes,
   };
 }
 

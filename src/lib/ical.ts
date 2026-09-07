@@ -27,6 +27,9 @@ export function parseICal(text: string, feedId: string, color: string): Calendar
     if (!ev || !ev.startDate) continue;
 
     const title = ev.summary || '(no title)';
+    // Pulled through for the event detail popover — the grid never shows these.
+    const description = ev.description || undefined;
+    const location = ev.location || undefined;
     const allDay = ev.startDate.isDate ?? false;
 
     if (ev.isRecurring()) {
@@ -47,6 +50,7 @@ export function parseICal(text: string, feedId: string, color: string): Calendar
           out.push({
             id: `${feedId}:${ev.uid}:${startMs}`,
             title, start: startMs, end: endMs, allDay, color, source: 'ical',
+            description, location, feedId,
           });
         }
         next = it.next();
@@ -58,7 +62,7 @@ export function parseICal(text: string, feedId: string, color: string): Calendar
         id: `${feedId}:${ev.uid}:${startMs}`,
         title, start: startMs,
         end: ev.endDate ? ev.endDate.toJSDate().getTime() : null,
-        allDay, color, source: 'ical',
+        allDay, color, source: 'ical', description, location, feedId,
       });
     }
   }

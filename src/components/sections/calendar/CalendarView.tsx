@@ -13,6 +13,7 @@ import ColorBankPicker from '../../shared/ColorBankPicker';
 import AddFeedForm from './AddFeedForm';
 import TypeTimetableForm from './TypeTimetableForm';
 import CalendarsMenu from './CalendarsMenu';
+import EventDetailPopover from './EventDetailPopover';
 
 interface CalendarViewProps {
   t: Theme;
@@ -319,12 +320,16 @@ function CreateEventForm({
  * `columns` is an array of { day, events } — one column per day.
  * All-day events are rendered above in a separate band.
  */
+/** Opening the detail popover: the event plus where on screen it was clicked. */
+type EventClick = (event: CalendarEvent, at: { x: number; y: number }) => void;
+
 function TimeGrid({
-  t, columns, onClickSlot,
+  t, columns, onClickSlot, onEventClick,
 }: {
   t: Theme;
   columns: Array<{ day: Date; events: CalendarEvent[] }>;
   onClickSlot: (day: Date, startMin?: number) => void;
+  onEventClick: EventClick;
 }) {
   const hours = Array.from(
     { length: GRID_END_HOUR - GRID_START_HOUR },
@@ -365,7 +370,7 @@ function TimeGrid({
             onClick={() => onClickSlot(day)}
           >
             {allDay.map(e => (
-              <EventChip key={e.id} event={e} t={t} />
+              <EventChip key={e.id} event={e} t={t} onEventClick={onEventClick} />
             ))}
           </div>
         ))}
@@ -453,7 +458,7 @@ function TimeGrid({
                   <div
                     key={event.id}
                     title={`${minToLabel(sm)}-${minToLabel(em)} · ${event.title}`}
-                    onClick={e => e.stopPropagation()}
+                    onClick={ev => { ev.stopPropagation(); onEventClick(event, { x: ev.clientX, y: ev.clientY }); }}
                     style={{
                       position: 'absolute',
                       top: topPx + 1,
@@ -517,10 +522,14 @@ function layoutTimedEvents(events: CalendarEvent[]): Array<{ event: CalendarEven
   return result;
 }
 
-function EventChip({ event, t }: { event: CalendarEvent; t: Theme }) {
+function EventChip({ event, t, onEventClick }: { event: CalendarEvent; t: Theme; onEventClick?: EventClick }) {
   const isDeadline = event.source === 'deadline';
   return (
-    <div style={{
+    <div
+      onClick={onEventClick ? (ev => { ev.stopPropagation(); onEventClick(event, { x: ev.clientX, y: ev.clientY }); }) : undefined}
+      title={event.title}
+      style={{
+      cursor: onEventClick ? 'pointer' : undefined,
       display: 'flex', alignItems: 'center', gap: '3px',
       fontSize: '0.62rem',
       padding: isDeadline ? '1px 4px' : '2px 5px',
@@ -540,8 +549,9 @@ function EventChip({ event, t }: { event: CalendarEvent; t: Theme }) {
 
 // ── Month grid ────────────────────────────────────────────────────────────────
 
-function MonthGrid({ t, cursor, events, onPick }: {
+function MonthGrid({ t, cursor, events, onPick, onEventClick }: {
   t: Theme; cursor: Date; events: CalendarEvent[]; onPick: (d: Date) => void;
+  onEventClick: EventClick;
 }) {
   const days = eachDayOfInterval({
     start: startOfWeek(startOfMonth(cursor), WEEK_OPTS),
@@ -589,7 +599,13 @@ function MonthGrid({ t, cursor, events, onPick }: {
 
               {/* Timed events — pill with clock + time */}
               {timedEvents.slice(0, 2).map(e => (
-                <div key={e.id} style={{
+                <div
+                  key={e.id}
+                  role="button"
+                  title={e.title}
+                  onClick={ev => { ev.stopPropagation(); onEventClick(e, { x: ev.clientX, y: ev.clientY }); }}
+                  style={{
+                  cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: '2px',
                   fontSize: '0.6rem', overflow: 'hidden',
                   background: e.color + '40', borderRadius: '3px',
@@ -607,7 +623,13 @@ function MonthGrid({ t, cursor, events, onPick }: {
 
               {/* All-day iCal events — solid pill */}
               {allDayEvents.slice(0, 2).map(e => (
-                <div key={e.id} style={{
+                <div
+                  key={e.id}
+                  role="button"
+                  title={e.title}
+                  onClick={ev => { ev.stopPropagation(); onEventClick(e, { x: ev.clientX, y: ev.clientY }); }}
+                  style={{
+                  cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: '2px',
                   fontSize: '0.6rem', overflow: 'hidden',
                   background: e.color + '3a', borderRadius: '3px',
@@ -622,10 +644,15 @@ function MonthGrid({ t, cursor, events, onPick }: {
               {deadlineEvents.length > 0 && (
                 <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap', marginTop: '1px' }}>
                   {deadlineEvents.slice(0, 4).map(e => (
-                    <span key={e.id} title={e.title} style={{
-                      width: '6px', height: '6px', borderRadius: '50%',
-                      background: e.color, flexShrink: 0,
-                    }} />
+                    <span
+                      key={e.id}
+                      role="button"
+                      title={e.title}
+                      onClick={ev => { ev.stopPropagation(); onEventClick(e, { x: ev.clientX, y: ev.clientY }); }}
+                      style={{
+                        width: '6px', height: '6px', borderRadius: '50%',
+                        background: e.color, flexShrink: 0, cursor: 'pointer',
+                      }} />
                   ))}
                   {deadlineEvents.length > 4 && (
                     <span style={{ fontSize: '0.55rem', color: t.textDim }}>+{deadlineEvents.length - 4}</span>
@@ -882,6 +909,9 @@ export default function CalendarView({
   const [createFor, setCreateFor] = useState<{ day: Date; startMin?: number } | null>(null);
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [typeTimetableOpen, setTypeTimetableOpen] = useState(false);
+  // Clicked event + where, for the detail popover. Grid blocks truncate hard,
+  // so this is the only way to read a long title or see a room/description.
+  const [detail, setDetail] = useState<{ event: CalendarEvent; at: { x: number; y: number } } | null>(null);
   // Persisted dismissal of the "Add your timetable" front door, so a user who
   // doesn't want it (or connects a calendar another way) isn't nagged every visit.
   const [timetablePromptDismissed, setTimetablePromptDismissed] = useState<boolean>(() => {
@@ -918,6 +948,21 @@ export default function CalendarView({
       : mode === 'week'
         ? `${format(startOfWeek(cursor, WEEK_OPTS), 'd MMM')} - ${format(endOfWeek(cursor, WEEK_OPTS), 'd MMM yyyy')}`
         : format(cursor, 'EEEE d MMMM yyyy');
+
+  const openDetail: EventClick = (event, at) => {
+    setDetail({ event, at });
+    setCreateFor(null);
+  };
+
+  /** Which calendar an event came from, for the footer of the detail popover. */
+  const sourceLabelFor = (e: CalendarEvent): string | undefined => {
+    if (e.source === 'note') return 'Your events';
+    if (e.source === 'deadline') return 'Topic deadline';
+    const feed = e.feedId ? calendarFeeds.find(f => f.id === e.feedId) : undefined;
+    if (feed) return feed.label;
+    // Google/Apple events arrive already merged, without a feed id.
+    return 'Connected calendar';
+  };
 
   const handleClickSlot = (day: Date, startMin?: number) => {
     setCreateFor({ day, startMin });
@@ -1083,7 +1128,7 @@ export default function CalendarView({
       )}
 
       {mode === 'month' && (
-        <MonthGrid t={t} cursor={cursor} events={events} onPick={handlePickDay} />
+        <MonthGrid t={t} cursor={cursor} events={events} onPick={handlePickDay} onEventClick={openDetail} />
       )}
       {mode === 'week' && weekDays && (
         <div>
@@ -1110,6 +1155,7 @@ export default function CalendarView({
             t={t}
             columns={weekDays.map(d => ({ day: d, events: eventsOnDay(events, d) }))}
             onClickSlot={handleClickSlot}
+            onEventClick={openDetail}
           />
         </div>
       )}
@@ -1119,6 +1165,7 @@ export default function CalendarView({
             t={t}
             columns={[{ day: cursor, events: eventsOnDay(events, cursor) }]}
             onClickSlot={handleClickSlot}
+            onEventClick={openDetail}
           />
         </div>
       )}
@@ -1200,6 +1247,22 @@ export default function CalendarView({
             saveNote(note);
             setSelected(null);
           }}
+        />
+      )}
+
+      {detail && (
+        <EventDetailPopover
+          event={detail.event}
+          anchor={detail.at}
+          t={t}
+          sourceLabel={sourceLabelFor(detail.event)}
+          onClose={() => setDetail(null)}
+          // Only the user's own events can be deleted; feed and deadline events
+          // are owned elsewhere and read-only here.
+          onDelete={(() => {
+            const noteId = noteIdFromEvent(detail.event);
+            return noteId && onCalendarNotesChange ? () => deleteNote(noteId) : undefined;
+          })()}
         />
       )}
     </div>
