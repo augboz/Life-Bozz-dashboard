@@ -3,7 +3,7 @@
 // Bozz uses a merchant-of-record (Lemon Squeezy recommended) so a solo UK
 // founder never touches VAT/tax/invoicing. Desktop distribution means no
 // app-store 30% cut and no in-app-purchase mandate — checkout opens in the
-// system browser via tauri-plugin-opener.
+// browser chosen in Settings → "Open links in" (lib/links), or the system default.
 //
 // During beta there is no live checkout: openCheckout() opens the (placeholder)
 // product/waitlist page, and activateLicense() is stubbed. When money turns on
@@ -43,8 +43,8 @@ function open(url: string): boolean {
   if (!url) return false;
   void (async () => {
     try {
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl(url);
+      const { openLink } = await import('./links');
+      await openLink(url);
     } catch {
       try { window.open(url, '_blank', 'noopener'); } catch { /* ignore */ }
     }

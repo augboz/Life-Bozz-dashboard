@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BookOpen, RefreshCw, Plus } from 'lucide-react';
 import { isTauri } from '../../lib/platform';
+import { openLink } from '../../lib/links';
 import { getItem, setItem } from '../../lib/storage';
 import { extractNotionPageId } from '../../lib/notion';
 import { Widget, WidgetHeader, EmptyWidget } from '../shared/Widget';
@@ -221,7 +222,7 @@ export default function NotionWidget({ ctx }: { ctx: WidgetCtx }) {
           {pages.map(p => (
             <button
               key={p.id}
-              onClick={() => { if (isTauri()) { void import('@tauri-apps/plugin-opener').then(m => m.openUrl(p.url)); } else { window.open(p.url, '_blank'); } }}
+              onClick={() => { void openLink(p.url); }}
               title={p.url}
               style={{
                 textAlign: 'left', background: t.todoBg,

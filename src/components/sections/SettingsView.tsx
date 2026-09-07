@@ -12,6 +12,8 @@ import type {
 import { SectionHeader } from '../shared/ui';
 import { MOODS, THEME_COLOR_BANKS } from '../../lib/themes';
 import { DEFAULT_COLOR_BANK } from '../../lib/appearance';
+import { LINK_BROWSERS, type LinkBrowser } from '../../lib/links';
+import { isTauri } from '../../lib/platform';
 import PlanBlock from './settings/PlanBlock';
 
 interface SettingsViewProps {
@@ -494,6 +496,15 @@ export default function SettingsView({
             options={[{ id: 'briefing', label: 'Briefing' }, { id: 'week', label: 'Week' }, { id: 'board', label: 'Board' }]}
           />
         </Field>
+        {isTauri() && (
+          <Field label="Open links in" hint="Which browser external links open in. System default is whatever Windows/macOS uses, often Edge or Safari even if you prefer another." t={t}>
+            <Segmented<LinkBrowser>
+              value={appearance.linkBrowser ?? 'default'} t={t}
+              onChange={(v) => patchAppearance({ linkBrowser: v })}
+              options={LINK_BROWSERS}
+            />
+          </Field>
+        )}
 
         {/* ── Colour bank ── */}
         <div style={{ paddingTop: '0.5rem', borderTop: `1px solid ${t.border}` }}>

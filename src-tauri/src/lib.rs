@@ -488,6 +488,75 @@ async fn store_file_size(app_handle: tauri::AppHandle) -> Result<u64, String> {
     }
 }
 
+/// Open an http(s) URL in a specific browser (Settings → "Open links in").
+///
+/// The opener plugin only knows "the OS default", which on many Windows
+/// machines is Edge whether or not the user ever chose it. This launches the
+/// named browser directly; the frontend falls back to the OS default if it
+/// errors (browser not installed on this machine).
+#[tauri::command]
+fn open_in_browser(url: String, browser: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("only http(s) links can be opened in a browser".into());
+    }
+    let mut cmd = browser_command(&browser)?;
+    cmd.arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not launch {browser}: {e}"))
+}
+
+#[cfg(target_os = "windows")]
+fn browser_command(browser: &str) -> Result<std::process::Command, String> {
+    let exe = match browser {
+        "chrome" => "chrome.exe",
+        "edge" => "msedge.exe",
+        "firefox" => "firefox.exe",
+        _ => return Err(format!("unknown browser: {browser}")),
+    };
+    // Where each vendor's installer puts the binary. Checked in order; the
+    // last resort is PATH, which most browsers aren't on but some users add.
+    let sub = match browser {
+        "chrome" => r"Google\Chrome\Application",
+        "edge" => r"Microsoft\Edge\Application",
+        _ => "Mozilla Firefox",
+    };
+    let roots = ["ProgramFiles", "ProgramFiles(x86)", "LocalAppData"];
+    for root in roots {
+        if let Ok(base) = std::env::var(root) {
+            let p = std::path::Path::new(&base).join(sub).join(exe);
+            if p.exists() {
+                return Ok(std::process::Command::new(p));
+            }
+        }
+    }
+    Ok(std::process::Command::new(exe))
+}
+
+#[cfg(target_os = "macos")]
+fn browser_command(browser: &str) -> Result<std::process::Command, String> {
+    let app = match browser {
+        "chrome" => "Google Chrome",
+        "edge" => "Microsoft Edge",
+        "firefox" => "Firefox",
+        _ => return Err(format!("unknown browser: {browser}")),
+    };
+    let mut cmd = std::process::Command::new("open");
+    cmd.args(["-a", app]);
+    Ok(cmd)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn browser_command(browser: &str) -> Result<std::process::Command, String> {
+    let bin = match browser {
+        "chrome" => "google-chrome",
+        "edge" => "microsoft-edge",
+        "firefox" => "firefox",
+        _ => return Err(format!("unknown browser: {browser}")),
+    };
+    Ok(std::process::Command::new(bin))
+}
+
 /// Show the small floating quick-capture window, creating it on first use.
 fn open_quick_capture(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quickcapture") {
@@ -618,7 +687,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_backup, store_file_size, secret_set, secret_get, secret_delete,
-            oauth_run, open_oauth_window, start_oauth_server, imap_fetch
+            oauth_run, open_oauth_window, start_oauth_server, imap_fetch, open_in_browser
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

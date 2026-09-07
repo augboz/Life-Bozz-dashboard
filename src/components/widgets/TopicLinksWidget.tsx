@@ -4,19 +4,11 @@ import type { Theme } from '../../lib/types';
 import { Widget } from '../shared/Widget';
 import type { WidgetCtx } from './context';
 import type { TopicLink } from '../../lib/types';
-import { isTauri } from '../../lib/platform';
+import { openLink } from '../../lib/links';
 import { fetchFaviconDataUrl } from '../../lib/favicon';
 
 const ACCENT = '#a1bdc7';
 
-async function openLink(url: string) {
-  if (isTauri()) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-  } else {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-}
 
 type LinkSize = 'compact' | 'cozy' | 'full';
 const SIZE_ORDER: LinkSize[] = ['compact', 'cozy', 'full'];

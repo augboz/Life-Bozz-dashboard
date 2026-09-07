@@ -17,7 +17,7 @@ import { iconForTopic } from './sections/settings/TopicsBlock';
 import { useSession } from './AuthGate';
 import { pullSnapshot, schedulePush, pushSnapshot, clearLocalSnapshot, cancelPendingPush, hasLocalData, getLastSyncBlock, consumePullOnlyReload, hasPendingPush } from '../lib/sync';
 import { supabase } from '../lib/supabase';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openLink } from '../lib/links';
 import { listen } from '@tauri-apps/api/event';
 import { getItem, setItem, initBackup } from '../lib/storage';
 import { themes } from '../lib/themes';
@@ -749,7 +749,7 @@ export default function Dashboard() {
     } catch (e) { console.error('Delete failed:', e); }
   };
 
-  const onEmailOpen = (m: EmailMessage) => { openUrl(m.permalink).catch(console.error); };
+  const onEmailOpen = (m: EmailMessage) => { openLink(m.permalink).catch(console.error); };
 
   // Once a week, when the configured trigger has passed, create a pending review.
   useEffect(() => {

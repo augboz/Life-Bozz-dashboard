@@ -464,6 +464,12 @@ export interface AppearancePrefs {
   activeWorldId?: string;
   /** Ambient-sound state for the active World's looping audio. */
   ambient?: { worldId: string; volume: number; muted: boolean };
+  /**
+   * Which browser external links open in. Unset = the OS default, which on
+   * many Windows machines is Edge whether the user chose it or not — the
+   * reason this exists. See lib/links.ts.
+   */
+  linkBrowser?: 'default' | 'chrome' | 'edge' | 'firefox';
 }
 
 // ── Priority alerts (Bozz Plus — "Watch" pillar) ─────────────────────────────

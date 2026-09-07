@@ -2,7 +2,7 @@ import { type ElementType, type CSSProperties } from 'react';
 import { Newspaper, Briefcase, Bell, MessageSquare, Users, ExternalLink } from 'lucide-react';
 import { Widget, WidgetHeader } from '../shared/Widget';
 import type { WidgetCtx } from './context';
-import { isTauri } from '../../lib/platform';
+import { openLink } from '../../lib/links';
 
 // LinkedIn's API doesn't allow reading your feed/messages/notifications, so this
 // is a quick-access launcher: one tap opens the right LinkedIn section in your
@@ -19,14 +19,6 @@ function LinkedInMark({ size = 16, color = 'currentColor', style }: { size?: num
   );
 }
 
-async function openLink(url: string) {
-  if (isTauri()) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-  } else {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-}
 
 const SHORTCUTS: Array<{ label: string; url: string; Icon: ElementType }> = [
   { label: 'Feed',          url: 'https://www.linkedin.com/feed/',          Icon: Newspaper },

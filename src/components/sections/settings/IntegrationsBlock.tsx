@@ -32,7 +32,7 @@ const tauriListen = async <T,>(event: string, cb: (e: { payload: T }) => void) =
   const { listen } = await import('@tauri-apps/api/event'); return listen<T>(event, cb);
 };
 const tauriOpenUrl = async (url: string) => {
-  const { openUrl } = await import('@tauri-apps/plugin-opener'); return openUrl(url);
+  const { openLink } = await import('../../../lib/links'); return openLink(url);
 };
 const tauriWebviewWindow = async (label: string, opts: Record<string, unknown>) => {
   const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');

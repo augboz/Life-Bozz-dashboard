@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
 import type { Layout, LayoutItem } from 'react-grid-layout/legacy';
 import { Plus, X, Link, StickyNote, ChevronDown, ExternalLink, Pencil, Check, Settings2 } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openLink } from '../../lib/links';
 import type { TopicLink } from '../../lib/types';
 import { isMobileViewport, isTauri } from '../../lib/platform';
 import type { Theme, Topic, HomeWidgetItem } from '../../lib/types';
@@ -191,7 +191,7 @@ export function TopicDashboard({ topic, onChange, t }: { topic: Topic; onChange:
                   borderRadius: '999px', padding: '0.25rem 0.6rem 0.25rem 0.5rem',
                 }}>
                   <button
-                    onClick={() => openUrl(l.url)}
+                    onClick={() => { void openLink(l.url); }}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
                       background: 'none', border: 'none', cursor: 'pointer',

@@ -160,7 +160,6 @@ export default function AuthGate({ children }: Props) {
         // valid OAuth redirect. Use a local TCP server + system browser instead.
         const { invoke } = await import('@tauri-apps/api/core');
         const { listen }  = await import('@tauri-apps/api/event');
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
 
         // Tear down a previous attempt first. Every click used to add ANOTHER
         // 'oauth:callback' listener, and one callback then ran all of them: the
@@ -205,7 +204,8 @@ export default function AuthGate({ children }: Props) {
         });
         oauthCleanup.current = () => { try { unlisten(); } catch { /* already gone */ } };
 
-        await openUrl(data.url);
+        const { openLink } = await import('../lib/links');
+        await openLink(data.url);
         setStatus({ text: 'Browser opened. Sign in with Google, then return here.', ok: true });
       } else {
         const { error } = await supabase.auth.signInWithOAuth({
