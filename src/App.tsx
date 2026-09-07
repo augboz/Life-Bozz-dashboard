@@ -23,6 +23,50 @@ function DashboardKeyed() {
     if (!uid) return;
     let lastCheck = 0;
     let busy = false;
+    // A reload remounts Dashboard through its loading screen, which throws
+    // away whatever the user was in the middle of. It used to fire the moment
+    // a remote change was noticed — including right after the user's own save
+    // merged with a remote write — so someone editing a page kept being
+    // dropped back to "loading" (2026-09-07). Now a reload is only *requested*
+    // here, and applied by the ticker below once the user has been idle.
+    let reloadWanted = false;
+    let lastInputAt = 0;
+    let lastReloadAt = 0;
+    const recentReloads: number[] = [];
+    const IDLE_MS = 15_000;          // no typing/clicking for this long
+    const MIN_GAP_MS = 60_000;       // never more than one reload a minute
+    const LOOP_WINDOW_MS = 15 * 60_000;
+    const LOOP_LIMIT = 4;            // beyond this, something is ping-ponging: stop
+    let autoReloadDisabled = false;
+
+    const noteInput = () => { lastInputAt = Date.now(); };
+    const editing = () => {
+      const el = document.activeElement as HTMLElement | null;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    };
+
+    const applyReloadIfIdle = async () => {
+      if (!reloadWanted || autoReloadDisabled) return;
+      const now = Date.now();
+      if (now - lastInputAt < IDLE_MS || editing()) return;
+      if (now - lastReloadAt < MIN_GAP_MS) return;
+      const { hasPendingPush, requestPullOnlyReload } = await import('./lib/sync');
+      if (hasPendingPush()) return;   // our own write is about to land; let it
+      while (recentReloads.length && now - recentReloads[0] > LOOP_WINDOW_MS) recentReloads.shift();
+      if (recentReloads.length >= LOOP_LIMIT) {
+        autoReloadDisabled = true;
+        console.warn('[sync] auto-refresh paused for this session: it reloaded '
+          + `${LOOP_LIMIT} times in ${LOOP_WINDOW_MS / 60_000} min, which means two devices are ping-ponging. `
+          + 'Restart Bozz to re-enable.');
+        return;
+      }
+      recentReloads.push(now);
+      lastReloadAt = now;
+      reloadWanted = false;
+      requestPullOnlyReload();
+      setSyncGen(g => g + 1);
+    };
+
     const check = async () => {
       if (document.visibilityState !== 'visible') return;
       const now = Date.now();
@@ -30,35 +74,33 @@ function DashboardKeyed() {
       lastCheck = now;
       busy = true;
       try {
-        const { hasPendingPush, remoteChanged, requestPullOnlyReload } = await import('./lib/sync');
-        if (!hasPendingPush() && await remoteChanged(uid)) {
-          requestPullOnlyReload();
-          setSyncGen(g => g + 1);
-        }
+        const { hasPendingPush, remoteChanged } = await import('./lib/sync');
+        if (!hasPendingPush() && await remoteChanged(uid)) reloadWanted = true;
       } catch { /* offline — the next foreground check retries */ }
       finally { busy = false; }
+      void applyReloadIfIdle();
     };
     const onFocus = () => { void check(); };
     const onVisible = () => { if (document.visibilityState === 'visible') void check(); };
     const interval = setInterval(() => { void check(); }, 3 * 60_000);
+    const ticker = setInterval(() => { void applyReloadIfIdle(); }, 5_000);
     // A mid-session push discovered remote-only records and unioned them into
-    // local storage (see pushSnapshot) — the mounted UI has never seen them,
-    // so reload state through the pull-only path.
-    const onMerged = async () => {
-      try {
-        const { requestPullOnlyReload } = await import('./lib/sync');
-        requestPullOnlyReload();
-        setSyncGen(g => g + 1);
-      } catch { /* next boot shows the union anyway */ }
-    };
+    // local storage (see pushSnapshot) — the mounted UI has never seen them.
+    // The data is already safe on disk, so the reload can wait for idle.
+    const onMerged = () => { reloadWanted = true; void applyReloadIfIdle(); };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('bozz:remote-merged', onMerged);
+    window.addEventListener('keydown', noteInput, true);
+    window.addEventListener('pointerdown', noteInput, true);
     return () => {
       clearInterval(interval);
+      clearInterval(ticker);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('bozz:remote-merged', onMerged);
+      window.removeEventListener('keydown', noteInput, true);
+      window.removeEventListener('pointerdown', noteInput, true);
     };
   }, [uid]);
   return <Dashboard key={`${uid ?? 'anon'}:${syncGen}`} />;

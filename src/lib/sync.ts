@@ -339,6 +339,10 @@ export async function pullSnapshot(userId: string): Promise<boolean> {
     if (!data) { lastSeenStampMs = 0; return false; } // first sign-in for this account
     const row = data as RemoteRow;
     lastSeenStampMs = Date.parse(row.updated_at) || 0;
+    // Page backgrounds are per-device (see stripTopicLocalOnly): a pulled topics
+    // array must not wipe the ones this device already has.
+    let localTopics: unknown[] = [];
+    try { const lt = await getItem('topics'); if (lt?.value) localTopics = JSON.parse(lt.value); } catch { /* fresh device */ }
     // Write all keys to local storage in parallel for faster sign-in.
     await Promise.all(
       Object.entries(row.data ?? {})
@@ -355,7 +359,8 @@ export async function pullSnapshot(userId: string): Promise<boolean> {
           !(NEVER_PULL_KEYS as readonly string[]).includes(key))
         .map(async ([key, value]) => {
           try {
-            await setItem(key, JSON.stringify(value));
+            const toWrite = key === 'topics' && Array.isArray(value) ? keepLocalPageBg(value, localTopics) : value;
+            await setItem(key, JSON.stringify(toWrite));
           } catch (e) {
             console.error(`[sync] writing local ${key}:`, e);
           }
@@ -425,9 +430,72 @@ export async function readLocalSnapshot(): Promise<Record<string, unknown>> {
  * `silentMerge` suppresses the `bozz:remote-merged` UI-reload event for call
  * sites that manage their own state lifecycle (boot, sign-out).
  */
+let pushInFlight: Promise<boolean> | null = null;
+/** A push asked for while one was in flight; runs once the current one lands. */
+let pushAgainFor: string | null = null;
+
+/**
+ * Topic fields that never leave the device. A page background is a base64
+ * image of up to several MB; two of them made the cloud row 5.4MB, so every
+ * save uploaded 5MB and every refresh downloaded it (2026-09-07). Like
+ * homeBackground and photos, backgrounds are per-device.
+ */
+function stripTopicLocalOnly(snapshot: Record<string, unknown>): Record<string, unknown> {
+  const topics = snapshot.topics;
+  if (!Array.isArray(topics)) return snapshot;
+  return {
+    ...snapshot,
+    topics: topics.map(t => {
+      if (!isPlainObject(t) || !('pageBg' in t)) return t;
+      const { pageBg: _dropped, ...rest } = t as Record<string, unknown>;
+      return rest;
+    }),
+  };
+}
+
+/**
+ * Topics arriving from the cloud carry no page background; keep the one this
+ * device already has for the same topic, so a pull never wipes it.
+ */
+function keepLocalPageBg(remoteTopics: unknown[], localTopics: unknown[]): unknown[] {
+  const localBg = new Map<unknown, unknown>();
+  for (const t of localTopics) if (isPlainObject(t) && t.pageBg) localBg.set(t.id, t.pageBg);
+  return remoteTopics.map(t => {
+    if (!isPlainObject(t)) return t;
+    const { pageBg: _remote, ...rest } = t as Record<string, unknown>;
+    const mine = localBg.get(rest.id);
+    return mine ? { ...rest, pageBg: mine } : rest;
+  });
+}
+
 export async function pushSnapshot(
   userId: string,
   opts: { force?: boolean; silentMerge?: boolean } = {},
+): Promise<boolean> {
+  // One push at a time. Overlapping pushes (a save every couple of seconds
+  // while editing, each round-trip taking seconds) could land out of order:
+  // the later upload finished first, then the earlier one set lastSeenStampMs
+  // back to its older stamp. The next push then saw the row as changed by
+  // someone else, merged with our own data, fired the reload event, and the
+  // UI remounted to a loading screen mid-edit. Repeatedly (2026-09-07).
+  if (pushInFlight) {
+    pushAgainFor = userId;
+    return pushInFlight;
+  }
+  pushInFlight = runPush(userId, opts).finally(() => {
+    pushInFlight = null;
+    if (pushAgainFor) {
+      const again = pushAgainFor;
+      pushAgainFor = null;
+      schedulePush(again);
+    }
+  });
+  return pushInFlight;
+}
+
+async function runPush(
+  userId: string,
+  opts: { force?: boolean; silentMerge?: boolean },
 ): Promise<boolean> {
   if (!syncEnabled()) {
     return blockPush('dev-build', 'dev builds do not sync (set VITE_ALLOW_DEV_SYNC=true to opt in)');
@@ -441,51 +509,70 @@ export async function pushSnapshot(
     let mergedWithRemote = false;
 
     if (!opts.force) {
-      const { data: remote, error: readError } = await supabase
+      // Cheap head read first: only the stamp. The full row is fetched only
+      // when someone else wrote it, which is the exception, not every save.
+      const { data: head, error: headError } = await supabase
         .from('user_data')
-        .select('data, updated_at')
+        .select('updated_at')
         .eq('user_id', userId)
         .maybeSingle();
-      if (readError) {
-        console.error('[sync] pre-push read error:', readError);
-        return blockPush(await classifyFailure(readError), `reading the cloud copy failed: ${describeError(readError)}`);
+      if (headError) {
+        console.error('[sync] pre-push read error:', headError);
+        return blockPush(await classifyFailure(headError), `reading the cloud copy failed: ${describeError(headError)}`);
       }
-      const remoteRow = remote as { data?: Record<string, unknown>; updated_at?: string } | null;
-      const remoteData = remoteRow?.data;
-      if (remoteData) {
-        // MERGE, DON'T REPLACE. Sync used to upload this device's whole blob,
-        // which deleted anything that existed only on another device — each
-        // laptop's boot erased the other laptop's topics (2026-08-10). If the
-        // row has been written since we last synced (or we've never synced this
-        // session, e.g. the boot push), union the remote into our snapshot:
-        // records existing only remotely survive, records on both sides take
-        // this device's version. Deletions made here while another device was
-        // also writing can resurrect — the cost of never losing a topic.
-        const remoteMs = Date.parse(remoteRow?.updated_at ?? '') || 0;
-        if (lastSeenStampMs === null || remoteMs !== lastSeenStampMs) {
-          const filteredRemote = Object.fromEntries(
+      const remoteMs = Date.parse((head as { updated_at?: string } | null)?.updated_at ?? '') || 0;
+      const unseen = head !== null && (lastSeenStampMs === null || remoteMs !== lastSeenStampMs);
+
+      if (unseen) {
+        const { data: remote, error: readError } = await supabase
+          .from('user_data')
+          .select('data')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (readError) {
+          console.error('[sync] pre-push read error:', readError);
+          return blockPush(await classifyFailure(readError), `reading the cloud copy failed: ${describeError(readError)}`);
+        }
+        const remoteData = (remote as { data?: Record<string, unknown> } | null)?.data;
+        if (remoteData) {
+          // MERGE, DON'T REPLACE. Sync used to upload this device's whole blob,
+          // which deleted anything that existed only on another device — each
+          // laptop's boot erased the other laptop's topics (2026-08-10). If the
+          // row has been written since we last synced (or we've never synced
+          // this session, e.g. the boot push), union the remote into our
+          // snapshot: records existing only remotely survive, records on both
+          // sides take this device's version. Deletions made here while another
+          // device was also writing can resurrect — the cost of never losing a
+          // topic.
+          const filteredRemote = stripTopicLocalOnly(Object.fromEntries(
             Object.entries(remoteData).filter(([key]) =>
               !NEVER_PULL_PREFIXES.some(p => key.startsWith(p)) &&
               !(NEVER_PULL_KEYS as readonly string[]).includes(key)),
-          );
-          snapshot = deepUnionMerge(snapshot, filteredRemote) as Record<string, unknown>;
-          mergedWithRemote = true;
-          // Persist the union locally BEFORE uploading, so even if the upsert
-          // fails the remote-only records now live on this device too.
-          await Promise.all(
-            Object.entries(snapshot).map(async ([key, value]) => {
-              try {
-                await setItem(key, JSON.stringify(value));
-              } catch (e) {
-                console.error(`[sync] writing merged ${key}:`, e);
-              }
-            }),
-          );
+          ));
+          const union = deepUnionMerge(snapshot, filteredRemote) as Record<string, unknown>;
+          // Only a union that actually brought something new is worth
+          // persisting and reloading the UI for. A stamp that moved because of
+          // our own earlier write yields an identical union — no reload.
+          if (JSON.stringify(union) !== JSON.stringify(snapshot)) {
+            snapshot = union;
+            mergedWithRemote = true;
+            // Persist the union locally BEFORE uploading, so even if the upsert
+            // fails the remote-only records now live on this device too.
+            await Promise.all(
+              Object.entries(snapshot).map(async ([key, value]) => {
+                try {
+                  await setItem(key, JSON.stringify(value));
+                } catch (e) {
+                  console.error(`[sync] writing merged ${key}:`, e);
+                }
+              }),
+            );
+          }
+          // After a union this can't trip (the union is a superset of remote);
+          // it still guards the no-merge path and pathological snapshots.
+          const reason = thinPushReason(snapshot, remoteData);
+          if (reason) return blockPush('thin-local', reason);
         }
-        // After a union this can't trip (the union is a superset of remote);
-        // it still guards the no-merge path and pathological snapshots.
-        const reason = thinPushReason(snapshot, remoteData);
-        if (reason) return blockPush('thin-local', reason);
       }
     }
 
@@ -493,14 +580,16 @@ export async function pushSnapshot(
     const { error } = await supabase
       .from('user_data')
       .upsert(
-        { user_id: userId, data: snapshot, updated_at: stamp },
+        { user_id: userId, data: stripTopicLocalOnly(snapshot), updated_at: stamp },
         { onConflict: 'user_id' },
       );
     if (error) {
       console.error('[sync] push error:', error);
       return blockPush(await classifyFailure(error), `uploading failed: ${describeError(error)}`);
     }
-    lastSeenStampMs = Date.parse(stamp);
+    // Only ever moves forward: an older push completing late must not rewind
+    // it to a stamp the row no longer carries.
+    lastSeenStampMs = Math.max(lastSeenStampMs ?? 0, Date.parse(stamp));
     lastBlock = null;
     // A mid-session merge means local storage now holds records the mounted UI
     // has never seen; tell DashboardKeyed to reload state (skipped for the boot
@@ -564,7 +653,7 @@ export function consumePullOnlyReload(): boolean {
 }
 
 /** True while a debounced push is waiting to fire — local changes are in flight. */
-export function hasPendingPush(): boolean { return pushTimer !== null; }
+export function hasPendingPush(): boolean { return pushTimer !== null || pushInFlight !== null; }
 
 // ── Debounced push helper ────────────────────────────────────────────────
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
