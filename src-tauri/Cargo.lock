@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "bozz"
-version = "0.1.69"
+version = "0.1.70"
 dependencies = [
  "imap",
  "keyring",
