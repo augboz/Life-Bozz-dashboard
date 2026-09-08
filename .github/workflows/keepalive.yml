@@ -1,0 +1,42 @@
+name: Supabase keep-alive
+
+# Free-tier Supabase pauses a project after ~7 days without API activity, and a
+# paused project means sign-in and sync stop for every Bozz user until someone
+# notices and unpauses it from the dashboard. Supabase warned on 2026-09-07:
+# the shipped app had been unable to reach the project for weeks (a corrupt
+# build secret, fixed in v0.1.69), so it looked abandoned. One lightweight
+# request a day keeps it counted as active; failing the job when the project
+# does not answer turns a pause into a red workflow + email instead of a
+# silent outage.
+#
+# GitHub disables scheduled workflows in repos with no commits for 60 days;
+# Bozz ships far more often than that, and the release workflow's activity
+# counts too.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'   # daily, 06:17 UTC (odd minute avoids the top-of-hour crush)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the REST API and Auth
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+        run: |
+          set -e
+          # A row-level-secured table returns [] to the anon key, but the
+          # request still counts as activity.
+          rest=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/user_data?select=user_id&limit=1")
+          auth=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "apikey: $SUPABASE_KEY" "$SUPABASE_URL/auth/v1/health")
+          echo "REST: $rest  AUTH: $auth"
+          if [ "$rest" != "200" ] || [ "$auth" != "200" ]; then
+            echo "::error::Supabase project is not answering (REST $rest, AUTH $auth). If it was paused, unpause it at https://supabase.com/dashboard/project/horqjybypyzpgnipxtwu"
+            exit 1
+          fi
